@@ -29,6 +29,13 @@ struct Range {
 
 /**
  * @brief a concept that describes a Packet, which is a subset of the DataSet struct.
+ *
+ * The two types divide the work: a `DataSet` is the record blocks process inside a graph, and a `Packet` is the form a
+ * record takes at a transport boundary. Going from one to the other, positional facts stop and provenance facts cross:
+ * `timing_events` and the axes are indexed by a sample position and have no field in a `Packet`, while the metadata
+ * that describes the sampling without indexing anything (`sample_rate`, `sample_start`, `frequency`, `timestamp`)
+ * travels in `meta_information`. A block that transforms records speaks `DataSet`; `DataSetToPacket` and
+ * `PacketToDataSet` (gnuradio4-blocks, basic) are the boundary.
  */
 template<typename U, typename T = std::remove_cvref_t<U>>
 concept PacketLike = requires(T t) {
@@ -182,16 +189,16 @@ struct Packet {
     using pmt_map    = pmt::Value::Map;
     T default_value  = T(); // default value for padding, ZOH etc.
 
-    std::int64_t         timestamp = 0;   // UTC timestamp [ns]
-    std::vector<T>       signal_values{}; // size = \PI_i extents[i
+    std::int64_t         timestamp = 0;   // UTC timestamp [ns]; optional — 0 means unset, and a consumer must not derive a time from it
+    std::vector<T>       signal_values{}; // the payload, one flat run of items: a Packet has no extents
     std::vector<pmt_map> meta_information{};
 
     GR_MAKE_REFLECTABLE(Packet, timestamp, signal_values, meta_information);
 };
 
 static_assert(PacketLike<Packet<std::byte>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<float>>, "Packet<std::byte> concept conformity");
-static_assert(PacketLike<Packet<double>>, "Packet<std::byte> concept conformity");
+static_assert(PacketLike<Packet<float>>, "Packet<float> concept conformity");
+static_assert(PacketLike<Packet<double>>, "Packet<double> concept conformity");
 
 } // namespace gr
 
