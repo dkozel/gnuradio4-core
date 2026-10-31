@@ -2302,10 +2302,12 @@ public:
                     }
                 } else {
                     static_assert(not traits::block::can_processOne_simd<Derived>, "A non-const processOne function implies sample-by-sample processing, which is not compatible with SIMD arguments. Consider marking the function 'const' or using non-SIMD argument types.");
-                    const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
-                    userReturnStatus  = result.status;
-                    processedIn       = result.processedIn;
-                    processedOut      = result.processedOut;
+                    invokeUserProvidedFunction("invokeProcessOneNonConst", [&userReturnStatus, &inputSpans, &outputSpans, &processedIn, &processedOut, this] noexcept(HasNoexceptProcessOneFunction<Derived>) {
+                        const auto result = invokeProcessOneNonConst(inputSpans, outputSpans, processedIn);
+                        userReturnStatus  = result.status;
+                        processedIn       = result.processedIn;
+                        processedOut      = result.processedOut;
+                    });
                 }
             }
         } else {

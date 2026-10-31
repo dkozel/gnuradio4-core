@@ -16,6 +16,7 @@
 #include <print>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1391,6 +1392,21 @@ struct ReadFailingSource : gr::Block<ReadFailingSource> {
     }
 };
 
+// a device that counts its reads, so its processOne() cannot be const, and fails on the first one while the graph runs
+struct CountingReadFailingSource : gr::Block<CountingReadFailingSource> {
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(CountingReadFailingSource, out);
+
+    std::size_t _nReads = 0UZ;
+
+    [[nodiscard]] float processOne() {
+        _nReads++;
+        gStateAtFailure.store(this->state(), std::memory_order_release);
+        throw std::runtime_error(std::string(kRunFailure));
+    }
+};
+
 struct StopInsideWorkResult {
     bool                           entered = false; // a block entered its work() call before the stop
     std::expected<void, gr::Error> outcome;
@@ -1733,6 +1749,11 @@ const boost::ut::suite<"a block error while the scheduler stops"> errorWhileStop
     "a processBulk() ERROR before any stop ends the run in ERROR"_test = [] {
         qa_sched::expectErrorWhileRunningEndsRun<qa_sched::SerialScheduler, qa_sched::RunningFailingSource>(RUNNING);
         qa_sched::expectErrorWhileRunningEndsRun<qa_sched::BlockingScheduler, qa_sched::RunningFailingSource>(RUNNING);
+    };
+
+    "a non-const processOne() that throws before any stop ends the run in ERROR"_test = [] {
+        qa_sched::expectErrorWhileRunningEndsRun<qa_sched::SerialScheduler, qa_sched::CountingReadFailingSource>(RUNNING);
+        qa_sched::expectErrorWhileRunningEndsRun<qa_sched::BlockingScheduler, qa_sched::CountingReadFailingSource>(RUNNING);
     };
 
     "a block that requests its own stop and returns ERROR ends the run in ERROR"_test = [] {
