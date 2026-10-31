@@ -1161,6 +1161,10 @@ public:
         if constexpr (StrideControl::kEnabled) {
             static_assert(!kIsSourceBlock, "Stride is not available for source blocks. Remove 'Stride<>' from the block definition.");
         }
+        if constexpr (HasProcessOneFunction<Derived> && !HasProcessBulkFunction<Derived>) {
+            static_assert(traits::block::stream_input_ports<Derived>::template all_of<traits::port::is_synchronous>, "processOne() is not available for a block with an asynchronous stream input port: each call reads one item from every input, the number of calls is set by the synchronous ports alone, and an Async input is neither counted nor consumed, so the calls would read items the port does not hold. Remove Async from the port, or implement processBulk() and consume from the port explicitly.");
+            static_assert(traits::block::stream_output_ports<Derived>::template all_of<traits::port::is_synchronous>, "processOne() is not available for a block with an asynchronous stream output port: an Async output publishes only what the block requests through its span, which processOne() has no way to do, so every item it returns would be dropped. Remove Async from the port, or implement processBulk() and publish on the port explicitly.");
+        }
         if constexpr (unfilteredTagPropagation) {
             static_assert(!ResamplingControl::kEnabled, "UnfilteredTagPropagation is not available for a block declaring Resampling<>: a rate-changing block must map tag offsets itself in forwardTags().");
             static_assert(!StrideControl::kEnabled, "UnfilteredTagPropagation is not available for a block declaring Stride<>: skipped or overlapping input leaves a consumed sample without an output sample at the same offset, so forwardTags() must map the offsets.");
