@@ -2578,4 +2578,39 @@ const boost::ut::suite<"CircularBuffer::Writer::resource"> writerResourceTests =
     };
 };
 
+const boost::ut::suite<"CircularBuffer<bool>"> boolBufferTests = [] {
+    using namespace boost::ut;
+
+    // std::vector<bool> keeps its elements as bits, and a span over a brace-initialised {pointer, size} of bool is a
+    // two-element list: either one would hand the reader something other than the slots the writer filled
+    "a ring of bool gives the reader the values the writer published, across the wrap"_test = [](std::pmr::memory_resource* resource) {
+        gr::CircularBuffer<bool> buffer(1024UZ, std::pmr::polymorphic_allocator<bool>(resource));
+        auto                     writer = buffer.new_writer();
+        auto                     reader = buffer.new_reader();
+
+        constexpr std::size_t kChunk     = 300UZ;
+        const auto            expectedAt = [](std::size_t index) { return index % 3UZ == 0UZ; };
+        std::size_t           nWritten   = 0UZ;
+        std::size_t           nMismatch  = 0UZ;
+        for (std::size_t round = 0UZ; round < 10UZ; ++round) {
+            {
+                gr::WriterSpanLike auto out = writer.tryReserve(kChunk);
+                expect(fatal(eq(out.size(), kChunk)));
+                for (std::size_t i = 0UZ; i < kChunk; ++i) {
+                    out[i] = expectedAt(nWritten + i);
+                }
+                out.publish(kChunk);
+            }
+            gr::ReaderSpanLike auto in = reader.get(kChunk);
+            expect(fatal(eq(in.size(), kChunk)));
+            for (std::size_t i = 0UZ; i < kChunk; ++i) {
+                nMismatch += in[i] != expectedAt(nWritten + i) ? 1UZ : 0UZ;
+            }
+            expect(in.consume(kChunk));
+            nWritten += kChunk;
+        }
+        expect(eq(nMismatch, 0UZ)) << "the reader saw values the writer did not publish";
+    } | std::vector<std::pmr::memory_resource*>{std::pmr::new_delete_resource(), gr::double_mapped_memory_resource::defaultAllocator()};
+};
+
 int main() { /* not needed for UT */ }

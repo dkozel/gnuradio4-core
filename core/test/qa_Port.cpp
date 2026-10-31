@@ -8,6 +8,7 @@
 #include <complex>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <latch>
 #include <memory>
 #include <memory_resource>
@@ -18,7 +19,9 @@
 #include <thread>
 #include <vector>
 
+#include <gnuradio-4.0/Graph.hpp>
 #include <gnuradio-4.0/Port.hpp>
+#include <gnuradio-4.0/Scheduler.hpp>
 #include <gnuradio-4.0/meta/formatter.hpp>
 
 /**
@@ -1448,6 +1451,92 @@ const boost::ut::suite<"Port rings on first use"> _ringsOnFirstUse = [] { // NOS
             }
             expect(fatal(eq(counted.allocated.exchange(0UZ), onePair))) << std::format("round {}: the ports built more than one pair of rings", round);
         }
+    };
+};
+
+namespace qa_bool {
+
+constexpr std::size_t kNSamples = 1000UZ;
+
+struct Ramp : gr::Block<Ramp> {
+    gr::PortOut<float> out;
+
+    GR_MAKE_REFLECTABLE(Ramp, out);
+
+    std::size_t _nPublished = 0UZ;
+
+    [[nodiscard]] float processOne() {
+        if (++_nPublished == kNSamples) {
+            this->requestStop();
+        }
+        return static_cast<float>(_nPublished % 10UZ);
+    }
+};
+
+struct Threshold : gr::Block<Threshold> {
+    gr::PortIn<float> in;
+    gr::PortOut<bool> out;
+
+    GR_MAKE_REFLECTABLE(Threshold, in, out);
+
+    [[nodiscard]] constexpr bool processOne(float value) const noexcept { return value >= 5.0f; }
+};
+
+struct Invert : gr::Block<Invert> {
+    gr::PortIn<bool>  in;
+    gr::PortOut<bool> out;
+
+    GR_MAKE_REFLECTABLE(Invert, in, out);
+
+    gr::work::Status processBulk(std::span<const bool> input, std::span<bool> output) {
+        std::ranges::transform(input, output.begin(), std::logical_not{});
+        return gr::work::Status::OK;
+    }
+};
+
+struct CountingSink : gr::Block<CountingSink> {
+    gr::PortIn<bool> in;
+
+    GR_MAKE_REFLECTABLE(CountingSink, in);
+
+    std::size_t _nReceived = 0UZ;
+    std::size_t _nTrue     = 0UZ;
+
+    void processOne(bool value) {
+        _nReceived++;
+        _nTrue += value ? 1UZ : 0UZ;
+    }
+};
+
+template<typename TScheduler>
+void expectBoolsThroughGraph() {
+    using namespace boost::ut;
+    gr::Graph flow;
+    auto&     ramp      = flow.emplaceBlock<Ramp>();
+    auto&     threshold = flow.emplaceBlock<Threshold>();
+    auto&     invert    = flow.emplaceBlock<Invert>();
+    auto&     sink      = flow.emplaceBlock<CountingSink>();
+    expect(flow.connect<"out", "in">(ramp, threshold).has_value());
+    expect(flow.connect<"out", "in">(threshold, invert).has_value());
+    expect(flow.connect(invert, gr::PortDefinition("out"), sink, gr::PortDefinition("in")).has_value());
+
+    TScheduler scheduler;
+    expect(scheduler.exchange(std::move(flow)).has_value());
+    expect(scheduler.runAndWait().has_value());
+    expect(eq(sink._nReceived, kNSamples));
+    expect(eq(sink._nTrue, kNSamples / 2UZ)) << "half of the ramp lies below the threshold, and the inverter turns those true";
+}
+
+} // namespace qa_bool
+
+const boost::ut::suite<"Port<bool>"> boolPortTests = [] {
+    using namespace boost::ut;
+    using namespace qa_bool;
+
+    "bool samples pass through processOne() and processBulk() blocks"_test = [] {
+        expectBoolsThroughGraph<gr::scheduler::Simple<>>();
+        expectBoolsThroughGraph<gr::scheduler::Simple<gr::scheduler::ExecutionPolicy::multiThreaded>>();
+        expectBoolsThroughGraph<gr::scheduler::BreadthFirst<>>();
     };
 };
 

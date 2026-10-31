@@ -17,6 +17,7 @@ using polymorphic_allocator = std::experimental::pmr::polymorphic_allocator<T>;
 #include <cassert> // to assert if compiled for debugging
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <numeric>
 #include <ranges>
 #include <span>
@@ -193,6 +194,30 @@ enum class WriterSpanReservePolicy {
     TryReserve, // use non-blocking tryReserve() method
 };
 
+namespace detail {
+// the ring's slots as one contiguous allocation. std::vector<bool> packs its elements into bits and has no data(), so a
+// ring of bool holds its slots in a plain allocation that the spans can point into
+template<typename T, typename TAllocator>
+struct UnpackedSlots {
+    TAllocator  _allocator;
+    std::size_t _size;
+    T*          _slots;
+
+    UnpackedSlots(std::size_t size, TAllocator allocator) : _allocator(allocator), _size(size), _slots(_allocator.allocate(size)) { std::uninitialized_value_construct_n(_slots, size); }
+    UnpackedSlots(const UnpackedSlots&)            = delete;
+    UnpackedSlots& operator=(const UnpackedSlots&) = delete;
+    ~UnpackedSlots() {
+        std::destroy_n(_slots, _size);
+        _allocator.deallocate(_slots, _size);
+    }
+
+    [[nodiscard]] T* data() const noexcept { return _slots; }
+};
+
+template<typename T, typename TAllocator>
+using RingSlots = std::conditional_t<std::same_as<T, bool>, UnpackedSlots<T, TAllocator>, std::vector<T, TAllocator>>;
+} // namespace detail
+
 /**
  * @brief circular buffer implementation using double-mapped memory allocations
  * where the first SIZE-ed buffer is mirrored directly its end to mimic wrap-around
@@ -238,7 +263,7 @@ private:
         const std::size_t         _size;
         const std::size_t         _mask;
         const bool                _is_power_of_two;
-        std::vector<T, Allocator> _data;
+        detail::RingSlots<T, Allocator> _data;
         ClaimType                 _claimStrategy;
         std::size_t               _reader_count{0UZ};
         std::size_t               _writer_count{0UZ};
@@ -599,7 +624,7 @@ private:
         using reverse_iterator = typename std::span<const T>::reverse_iterator;
         using pointer          = typename std::span<const T>::reverse_iterator;
 
-        explicit constexpr ReaderSpan(Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan({&_parent->_buffer->_data.data()[index], nRequested}) { _parent->incInstanceCount(); }
+        explicit constexpr ReaderSpan(Reader<U>* parent, std::size_t index, std::size_t nRequested) noexcept : _parent(parent), _internalSpan(&_parent->_buffer->_data.data()[index], nRequested) { _parent->incInstanceCount(); }
 
         ReaderSpan(const ReaderSpan& other) : _parent(other._parent), _internalSpan(other._internalSpan) { _parent->incInstanceCount(); }
 
