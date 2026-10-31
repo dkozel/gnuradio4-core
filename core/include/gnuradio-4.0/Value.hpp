@@ -317,6 +317,12 @@ public:
     Value(const char* v, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
     Value(std::monostate, std::pmr::memory_resource* resource = std::pmr::get_default_resource());
 
+    // a scoped enum is stored as the name of its enumerator, the form in which settings, YAML and GRC files carry it, so
+    // {"mode", Mode::fast} sets an enum setting. An unscoped enum keeps converting to an integer
+    template<typename E>
+    requires std::is_scoped_enum_v<E>
+    Value(E value, std::pmr::memory_resource* resource = std::pmr::get_default_resource()) : Value(meta::enumName(value).value_or(std::string_view{}), resource) {}
+
     // copy/move/destructor
     Value(const Value& other) : Value(other, std::pmr::get_default_resource()) {}
     Value(const Value& other, std::pmr::memory_resource* resource) : _value_type(other._value_type), _container_type(other._container_type), _storage{}, _resource(ensure_resource(resource ? resource : other._resource)) { copy_from(other); }
@@ -498,12 +504,19 @@ public:
         return default_val;
     }
 
+    /// value_or for a scoped enum - parses the enumerator name that Value(E) stores
+    template<typename E>
+    requires std::is_scoped_enum_v<E>
+    [[nodiscard]] E value_or(E default_val) const& noexcept {
+        return meta::parseEnum<E>(value_or(std::string_view{})).value_or(default_val);
+    }
+
     // ─── Generic value_or (excludes string conversions handled above) ────────────────────────────
 
     /// monadic value_or — supports T, T&, const T&, T&&
     /// @return    copy/reference/moved value on match, fallback on mismatch
     template<typename T> // mutable
-    requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>>)
+    requires(!detail::is_string_convertible_v<std::remove_cvref_t<T>> && !std::is_scoped_enum_v<std::remove_cvref_t<T>>)
     [[nodiscard]] auto value_or(T&& default_val) & -> detail::return_t<T> {
         using Raw = std::remove_cvref_t<T>;
         if constexpr (std::is_rvalue_reference_v<T>) {
@@ -530,7 +543,7 @@ public:
     }
 
     template<typename T> // const value_or — only T and const T& (not T& or T&&)
-    requires(!std::is_same_v<T, std::monostate> && !detail::is_string_convertible_v<std::remove_cvref_t<T>>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
+    requires(!std::is_same_v<T, std::monostate> && !detail::is_string_convertible_v<std::remove_cvref_t<T>> && !std::is_scoped_enum_v<std::remove_cvref_t<T>>) && (!std::is_reference_v<T> || detail::is_const_ref_v<T>)
     [[nodiscard]] auto value_or(T&& default_val) const& -> detail::return_t<T> {
         using Raw = std::remove_cvref_t<T>;
         if constexpr (std::is_lvalue_reference_v<T>) {

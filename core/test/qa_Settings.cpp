@@ -2463,4 +2463,53 @@ const boost::ut::suite<"a value a callback stages during an apply"> callbackStag
     };
 };
 
+namespace qa_enum_settings {
+
+using namespace gr;
+
+enum class Shape { sine, square, triangle };
+
+struct ShapedSource : Block<ShapedSource> {
+    PortOut<float> out{};
+
+    Annotated<Shape, "shape"> shape = Shape::sine;
+
+    GR_MAKE_REFLECTABLE(ShapedSource, out, shape);
+
+    [[nodiscard]] constexpr float processOne() const noexcept { return 0.0f; }
+};
+
+} // namespace qa_enum_settings
+
+const boost::ut::suite<"enum settings given as enumerators"> enumSettingTests = [] {
+    using namespace boost::ut;
+    using namespace qa_enum_settings;
+
+    "an enumerator in the initial settings sets the enum setting"_test = [] {
+        gr::Graph     flow;
+        ShapedSource& source = flow.emplaceBlock<ShapedSource>({{"shape", Shape::triangle}});
+        expect(source.shape.value == Shape::triangle);
+    };
+
+    "a staged enumerator reaches the member and reads back as the enumerator"_test = [] {
+        ShapedSource source;
+        source.init(std::make_shared<gr::Sequence>());
+        expect(source.settings().setStaged({{"shape", Shape::square}}).empty());
+        std::ignore = source.settings().applyStagedParameters();
+        expect(source.shape.value == Shape::square);
+
+        const std::optional<pmt::Value> stored = source.settings().get("shape");
+        expect(fatal(stored.has_value()));
+        expect(stored->value_or(std::string_view{}) == "square") << "an enum setting is kept as the enumerator's name";
+        expect(stored->value_or(Shape::sine) == Shape::square) << "value_or() reads the name back as the enumerator";
+    };
+
+    "a name that is not an enumerator is refused, and the refusal lists the enumerators"_test = [] {
+        ShapedSource source;
+        source.init(std::make_shared<gr::Sequence>());
+        const std::string refusal = qa_refusals::setRefusal(source.settings(), {{"shape", std::string("sqaure")}});
+        expect(refusal.contains("sqaure") && refusal.contains("sine, square, triangle")) << refusal;
+    };
+};
+
 int main() { /* not needed by the UT framework */ }

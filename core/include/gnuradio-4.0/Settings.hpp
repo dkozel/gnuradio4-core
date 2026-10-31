@@ -143,17 +143,24 @@ constexpr bool isEnumOrAnnotatedEnum = std::is_enum_v<U>;
 template<typename T>
 requires isEnumOrAnnotatedEnum<T>
 std::expected<T, std::string> tryExtractEnumValue(const pmt::Value& pmt, std::string_view key) {
+    const auto enumeratorNames = [] {
+        std::string names;
+        for (const T enumerator : gr::meta::enumValues<T>()) {
+            names += std::format("{}{}", names.empty() ? "" : ", ", gr::meta::enumName(enumerator).value_or(""));
+        }
+        return names;
+    };
 
     auto str = pmt.value_or(std::string_view{});
     if (str.data() == nullptr) {
-        return std::unexpected(std::format("Field '{}' expects enum string, got different type", key));
+        return std::unexpected(std::format("Field '{}' expects the name of an enumerator ({}) or the enumerator itself, got {}", key, enumeratorNames(), pmt.value_type()));
     }
 
     if (auto opt = gr::meta::parseEnum<T>(str); opt.has_value()) {
         return *opt;
     }
 
-    return std::unexpected(std::format("Invalid enum value '{}' for key '{}'", str, key));
+    return std::unexpected(std::format("Invalid enum value '{}' for key '{}'; it takes one of: {}", str, key, enumeratorNames()));
 }
 
 template<typename T, typename U = std::remove_cvref_t<T>>

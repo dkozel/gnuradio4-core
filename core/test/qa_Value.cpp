@@ -340,6 +340,32 @@ const boost::ut::suite<"Value - Basic Construction"> _basic_construction_suite =
     };
 };
 
+enum class ScopedColour { red, green };
+enum UnscopedLevel { kLow = 3, kHigh = 7 };
+
+const boost::ut::suite<"Value - enum construction"> _enum_construction_suite = [] {
+    using namespace boost::ut;
+    using gr::pmt::Value;
+
+    "a scoped enumerator is stored as its name and reads back as the enumerator"_test = [] {
+        const Value colour = ScopedColour::green;
+        expect(colour.is_string());
+        expect(colour.value_or(std::string_view{}) == "green");
+        expect(colour.value_or(ScopedColour::red) == ScopedColour::green);
+        expect(Value("red").value_or(ScopedColour::green) == ScopedColour::red) << "a name given as text reads as the enumerator";
+    };
+
+    "value_or() returns the fallback for a name that is not an enumerator and for a value that is not text"_test = [] {
+        expect(Value("blue").value_or(ScopedColour::red) == ScopedColour::red);
+        expect(Value(std::int32_t{1}).value_or(ScopedColour::red) == ScopedColour::red);
+    };
+
+    "an unscoped enumerator converts to an integer as before"_test = [] {
+        const Value level = kHigh;
+        expect(level == Value(std::int32_t{7}));
+    };
+};
+
 const boost::ut::suite<"Value - container converting constructors"> _container_conversion_suite = [] {
     using namespace boost::ut;
     using gr::pmt::Value;
