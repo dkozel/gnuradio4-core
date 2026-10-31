@@ -2005,7 +2005,9 @@ public:
             work::Status status = work::Status::OK;
         };
 
-        if constexpr (!ResamplingControl::kEnabled) { // no resampling
+        // a stride makes every ratio, 1:1 included, process one chunk per call, and the stride check below does that
+        const bool hasActiveStride = StrideControl::kEnabled && stride.value != 0 && stride.value != input_chunk_size;
+        if constexpr (!ResamplingControl::kEnabled && !StrideControl::kEnabled) { // no resampling
             const std::size_t maxSync = std::min(maxSyncIn, maxSyncOut);
             if (maxSync < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
@@ -2017,7 +2019,7 @@ public:
             const auto resampled = std::clamp(requestedWork, minSync, maxSync);
             return ResamplingResult{.resampledIn = resampled, .resampledOut = resampled};
         }
-        if (input_chunk_size == 1UL && output_chunk_size == 1UL) { // no resampling
+        if (input_chunk_size == 1UL && output_chunk_size == 1UL && !hasActiveStride) { // no resampling
             const std::size_t maxSync = std::min(maxSyncIn, maxSyncOut);
             if (maxSync < minSyncIn) {
                 return ResamplingResult{.resampledIn = 0UZ, .resampledOut = 0UZ, .status = work::Status::INSUFFICIENT_INPUT_ITEMS};
@@ -2031,7 +2033,7 @@ public:
         }
         std::size_t nResamplingChunks;
         if constexpr (StrideControl::kEnabled) { // with stride, we cannot process more than one chunk
-            if (stride.value != 0 && stride.value != input_chunk_size) {
+            if (hasActiveStride) {
                 nResamplingChunks = input_chunk_size <= maxSyncIn && output_chunk_size <= maxSyncOut ? 1 : 0;
             } else {
                 nResamplingChunks = std::min(maxSyncIn / input_chunk_size, maxSyncOut / output_chunk_size);
