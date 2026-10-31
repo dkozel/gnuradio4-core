@@ -115,13 +115,19 @@ set(_COMPILE_FAIL_FILTERED_TESTS cf_FilteredTagPropagation_unfiltered cf_Filtere
 set(_COMPILE_FAIL_EVERY_KEY_TESTS cf_ForwardsEveryKey_forwardtags_deduced)
 set(_COMPILE_FAIL_DROPPED_TESTS cf_UnfilteredTagPropagation_dropped)
 set(_COMPILE_FAIL_DROPPED_TWICE_TESTS cf_DroppedTagKeys_twice)
+set(_COMPILE_FAIL_CONNECT_OUTPUT_TESTS cf_Connect_unknown_output_port)
+set(_COMPILE_FAIL_CONNECT_INPUT_TESTS cf_Connect_unknown_input_port)
+set(_COMPILE_FAIL_CONNECT_TYPE_TESTS cf_Connect_type_mismatch)
 foreach(
   TEST_NAME IN
   LISTS _COMPILE_FAIL_TESTS
         _COMPILE_FAIL_FILTERED_TESTS
         _COMPILE_FAIL_EVERY_KEY_TESTS
         _COMPILE_FAIL_DROPPED_TESTS
-        _COMPILE_FAIL_DROPPED_TWICE_TESTS)
+        _COMPILE_FAIL_DROPPED_TWICE_TESTS
+        _COMPILE_FAIL_CONNECT_OUTPUT_TESTS
+        _COMPILE_FAIL_CONNECT_INPUT_TESTS
+        _COMPILE_FAIL_CONNECT_TYPE_TESTS)
   add_executable(${TEST_NAME} EXCLUDE_FROM_ALL compile_fail/${TEST_NAME}.cpp)
   target_include_directories(${TEST_NAME} PRIVATE ${CMAKE_BINARY_DIR}/include ${CMAKE_CURRENT_BINARY_DIR})
   target_link_libraries(${TEST_NAME} PRIVATE gnuradio-options gnuradio-core)
@@ -164,6 +170,30 @@ set_tests_properties(
   ${_COMPILE_FAIL_DROPPED_TWICE_TESTS}
   PROPERTIES PASS_REGULAR_EXPRESSION
              "A block declares at most one DroppedTagKeys list"
+             RESOURCE_LOCK
+             gr_core_build_tree
+             TIMEOUT
+             300)
+set_tests_properties(
+  ${_COMPILE_FAIL_CONNECT_OUTPUT_TESTS}
+  PROPERTIES PASS_REGULAR_EXPRESSION
+             "the source block has no output port \"otu\"; its output ports are: out"
+             RESOURCE_LOCK
+             gr_core_build_tree
+             TIMEOUT
+             300)
+set_tests_properties(
+  ${_COMPILE_FAIL_CONNECT_INPUT_TESTS}
+  PROPERTIES PASS_REGULAR_EXPRESSION
+             "the destination block has no input port \"inn\"; its input ports are: in"
+             RESOURCE_LOCK
+             gr_core_build_tree
+             TIMEOUT
+             300)
+set_tests_properties(
+  ${_COMPILE_FAIL_CONNECT_TYPE_TESTS}
+  PROPERTIES PASS_REGULAR_EXPRESSION
+             "the two ports carry different types"
              RESOURCE_LOCK
              gr_core_build_tree
              TIMEOUT

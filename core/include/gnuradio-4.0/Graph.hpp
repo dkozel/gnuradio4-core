@@ -99,6 +99,23 @@ struct for_name {
     struct matches : std::bool_constant<matcherImpl<TPort>()> {};
 };
 
+// the names of a block's ports, as a diagnostic lists them: "in, gate#<index>, msg_in"
+template<typename TPortDescriptors>
+consteval std::string portNameList() {
+    std::string names;
+    TPortDescriptors::for_each([&names]<typename TPort>(auto, TPort*) {
+        names += names.empty() ? "" : ", ";
+        names += std::string_view(typename TPort::NameT{});
+        names += TPort::kIsDynamicCollection || TPort::kIsStaticCollection ? "#<index>" : "";
+    });
+    return names.empty() ? std::string("none") : names;
+}
+
+template<fixed_string SourcePort, fixed_string DestinationPort>
+consteval std::string connectCall() {
+    return std::string("connect<\"") + std::string(std::string_view(SourcePort)) + "\", \"" + std::string(std::string_view(DestinationPort)) + "\">(): ";
+}
+
 } // namespace detail
 
 namespace graph {
@@ -710,9 +727,17 @@ public:
         using SourcePortDescriptor      = typename traits::block::all_output_ports<SourceBlock>::template find_or_default<detail::for_name<SourcePort>::template matches, void>;
         using DestinationPortDescriptor = typename traits::block::all_input_ports<DestinationBlock>::template find_or_default<detail::for_name<DestinationPort>::template matches, void>;
 
-        static_assert(!std::is_same_v<void, SourcePortDescriptor>);
-        static_assert(!std::is_same_v<void, DestinationPortDescriptor>);
-        static_assert(std::is_same_v<typename SourcePortDescriptor::inner_value_type, typename DestinationPortDescriptor::inner_value_type>);
+        // a message built at compile time is a C++26 feature, which GCC 14 and Clang 17 onwards accept as an extension
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wc++26-extensions"
+        constexpr bool kHasSourcePort      = !std::is_same_v<void, SourcePortDescriptor>;
+        constexpr bool kHasDestinationPort = !std::is_same_v<void, DestinationPortDescriptor>;
+        static_assert(kHasSourcePort, detail::connectCall<SourcePort, DestinationPort>() + "the source block has no output port \"" + std::string(std::string_view(SourcePort)) + "\"; its output ports are: " + detail::portNameList<traits::block::all_output_ports<SourceBlock>>());
+        static_assert(kHasDestinationPort, detail::connectCall<SourcePort, DestinationPort>() + "the destination block has no input port \"" + std::string(std::string_view(DestinationPort)) + "\"; its input ports are: " + detail::portNameList<traits::block::all_input_ports<DestinationBlock>>());
+        if constexpr (kHasSourcePort && kHasDestinationPort) {
+            static_assert(std::is_same_v<typename SourcePortDescriptor::inner_value_type, typename DestinationPortDescriptor::inner_value_type>, detail::connectCall<SourcePort, DestinationPort>() + "the two ports carry different types, and an edge needs the same type at both ends");
+        }
+#pragma GCC diagnostic pop
 
         struct Result {
             PortDefinition definition;
