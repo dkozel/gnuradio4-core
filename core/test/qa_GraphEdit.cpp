@@ -6,6 +6,7 @@
 #include <bit>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <format>
 #include <functional>
@@ -110,6 +111,14 @@ struct Sink : gr::Block<Sink> {
     std::size_t _nReceived = 0UZ;
 
     void processOne(float) { _nReceived++; }
+};
+
+struct Int16Sink : gr::Block<Int16Sink> {
+    gr::PortIn<std::int16_t> in;
+
+    GR_MAKE_REFLECTABLE(Int16Sink, in);
+
+    void processOne(std::int16_t) {}
 };
 
 // a stream block with one declared message output and one declared message input
@@ -2095,6 +2104,44 @@ const boost::ut::suite<"graph editing"> graphEditTests = [] {
         expect(eq(edgeBufferSizeFor(81920.0), kMinEdgeBufferSize)) << "the lower knee is the floor over the seconds, and the floor still answers it";
         expect(eq(edgeBufferSizeFor(81940.0), 2UZ * kMinEdgeBufferSize)) << "one sample past the knee the rate takes over";
         expect(eq(edgeBufferSizeFor(83886080.0), kMaxEdgeBufferSize)) << "the upper knee is the ceiling over the seconds";
+    };
+
+    "connect() refuses an output port the source does not have and lists the ports it has"_test = [] {
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<qa_edit::Source>({{"name", std::string("source")}});
+        auto&     sink   = flow.emplaceBlock<qa_edit::Sink>();
+
+        const std::expected<void, gr::Error> refused = flow.connect(source, gr::PortDefinition("otu"), sink, gr::PortDefinition("in"));
+        expect(fatal(!refused.has_value())) << "the edge from a misspelt port was accepted";
+        const std::string& reason = refused.error().message;
+        expect(reason.contains(std::string(source.unique_name)) && reason.contains("no output port otu")) << "the refusal must name the block and the port: " << reason;
+        expect(reason.contains("its output ports: out")) << "the refusal must list the ports the block has: " << reason;
+        expect(flow.edges().empty()) << "the refused edge was listed";
+    };
+
+    "connect() refuses an input port the destination does not have and lists the ports it has"_test = [] {
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<qa_edit::Source>();
+        auto&     sink   = flow.emplaceBlock<qa_edit::Sink>({{"name", std::string("sink")}});
+
+        const std::expected<void, gr::Error> refused = flow.connect(source, gr::PortDefinition("out"), sink, gr::PortDefinition("inn"));
+        expect(fatal(!refused.has_value())) << "the edge into a misspelt port was accepted";
+        const std::string& reason = refused.error().message;
+        expect(reason.contains(std::string(sink.unique_name)) && reason.contains("no input port inn")) << "the refusal must name the block and the port: " << reason;
+        expect(reason.contains("its input ports: in")) << "the refusal must list the ports the block has: " << reason;
+        expect(flow.edges().empty()) << "the refused edge was listed";
+    };
+
+    "connect() refuses two ports of different types and names both types"_test = [] {
+        gr::Graph flow;
+        auto&     source = flow.emplaceBlock<qa_edit::Source>();
+        auto&     sink   = flow.emplaceBlock<qa_edit::Int16Sink>();
+
+        const std::expected<void, gr::Error> refused = flow.connect(source, gr::PortDefinition("out"), sink, gr::PortDefinition("in"));
+        expect(fatal(!refused.has_value())) << "a float output was connected to an int16 input";
+        const std::string& reason = refused.error().message;
+        expect(reason.contains("float") && reason.contains("int16")) << "the refusal must name both types: " << reason;
+        expect(flow.edges().empty()) << "the refused edge was listed";
     };
 
     "a second edge into a taken stream input is refused and the refusal names both edges"_test = [] {

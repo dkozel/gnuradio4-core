@@ -855,20 +855,18 @@ connections:
         expect(eq(samples.back(), 3.0f * 63.0f)) << "all three ramps reach the sum";
     };
 
-    // the edges are resolved when the scheduler takes the graph, so the file's own count shows at the run
+    // connect() checks the ports, so the file's own count refuses the third connection at the load
     "the file alone does not bring the third ramp to the sum"_test = [] {
         registerTestBlocks();
         PluginLoader& loader = gr::globalPluginLoader();
 
-        auto                    loaded = gr::loadGrc(loader, kSummedRamps);
-        gr::scheduler::Simple<> scheduler;
-        bool                    summedThree = false;
-        if (scheduler.exchange(std::move(loaded)).has_value() && scheduler.runAndWait().has_value()) {
-            const std::vector<float> samples = takeCollected("summed-sink");
-            summedThree                      = !samples.empty() && samples.back() == 3.0f * 63.0f;
+        std::string reason;
+        try {
+            std::ignore = gr::loadGrc(loader, kSummedRamps);
+        } catch (const gr::exception& e) {
+            reason = e.what();
         }
-        std::ignore = takeCollected("summed-sink");
-        expect(!summedThree) << "the file's own n_inputs of 2 leaves in#2 absent";
+        expect(reason.contains("no input port") && reason.contains("in#0..1")) << "the file's own n_inputs of 2 leaves in#2 absent, and the load must say so: " << reason;
     };
 
     "a given value replaces the file's value and leaves the other keys"_test = [] {

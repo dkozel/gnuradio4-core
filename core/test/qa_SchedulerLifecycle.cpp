@@ -1391,6 +1391,13 @@ struct ReadFailingSource : gr::Block<ReadFailingSource> {
     }
 };
 
+// lists an out -> in edge with addEdge(), which skips connect()'s checks, so the start or the resume is the first to try it
+[[nodiscard]] bool listUncheckedEdge(gr::Graph& flow, const auto& source, const auto& destination) {
+    auto sourceModel      = gr::graph::findBlock(flow, source);
+    auto destinationModel = gr::graph::findBlock(flow, destination);
+    return sourceModel.has_value() && destinationModel.has_value() && flow.addEdge(gr::Edge(*sourceModel, gr::PortDefinition{"out"}, *destinationModel, gr::PortDefinition{"in"}, gr::EdgeParameters{.minBufferSize = gr::graph::defaultMinBufferSize(true)})).has_value();
+}
+
 struct StopInsideWorkResult {
     bool                           entered = false; // a block entered its work() call before the stop
     std::expected<void, gr::Error> outcome;
@@ -2180,7 +2187,7 @@ const boost::ut::suite<"a start that cannot complete"> failedStartTests = [] {
         gr::Graph flow;
         auto&     source = flow.emplaceBlock<qa_sched::EndingSource>();
         auto&     sink   = flow.emplaceBlock<qa_sched::Int16Sink>();
-        expect(flow.connect(source, gr::PortDefinition{"out"}, sink, gr::PortDefinition{"in"}).has_value()) << "an edge given by port names is recorded before its types are compared";
+        expect(qa_sched::listUncheckedEdge(flow, source, sink)) << "the edge whose types differ was not listed";
 
         qa_sched::SerialScheduler scheduler;
         expect(scheduler.exchange(std::move(flow)).has_value());
@@ -2241,7 +2248,7 @@ const boost::ut::suite<"a start that cannot complete"> failedStartTests = [] {
                 expect(qa_sched::awaitObservedSamplesAbove(0UZ)) << "the run moved no samples";
                 expect(scheduler.changeStateTo(REQUESTED_PAUSE).has_value());
                 expect(qa_sched::awaitState(scheduler, PAUSED)) << "the scheduler did not pause";
-                expect(scheduler.graph().connect(source, gr::PortDefinition{"out"}, int16Sink, gr::PortDefinition{"in"}).has_value()) << "an edge given by port names is recorded before its types are compared";
+                expect(qa_sched::listUncheckedEdge(scheduler.graph(), source, int16Sink)) << "the edge whose types differ was not listed";
                 std::ignore = scheduler.changeStateTo(RUNNING);
             },
             &result);
@@ -6805,7 +6812,7 @@ void expectSweepWaitsForHeldWork(HeldWorkSweep sweep) {
         expect(awaitCondition([&probe] { return probe->nGateSamples.load(std::memory_order_relaxed) > 0UZ; })) << "the run moved no samples";
         expect(raw->changeStateTo(REQUESTED_PAUSE).has_value());
         expect(awaitCondition([raw] { return raw->state() == PAUSED; })) << "the scheduler did not pause";
-        expect(raw->graph().connect(source, gr::PortDefinition{"out"}, int16Sink, gr::PortDefinition{"in"}).has_value());
+        expect(listUncheckedEdge(raw->graph(), source, int16Sink));
         armed->store(true, std::memory_order_release);
         std::ignore = raw->changeStateTo(RUNNING);
         expect(raw->state() == ERROR) << "a resume whose edge did not connect must end the scheduler in ERROR";

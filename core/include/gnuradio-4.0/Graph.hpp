@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <bit>
 #include <map>
+#include <ranges>
 #include <tuple>
 #include <unordered_set>
 #include <variant>
@@ -657,15 +658,25 @@ public:
     std::optional<Message> propertyCallbackRegistryBlockTypes([[maybe_unused]] std::string_view propertyName, Message message);
     std::optional<Message> propertyCallbackRegistrySchedulerTypes([[maybe_unused]] std::string_view propertyName, Message message);
 
-    // an edge into an input that a listed edge already takes is refused, and the error names both edges
+    // an edge into an input that a listed edge already takes is refused, and the error names both edges. So is an edge
+    // whose port either block does not have, or whose two ports carry different types
     [[nodiscard]] std::expected<void, Error> connect(std::shared_ptr<BlockModel> sourceBlock, PortDefinition sourcePort, //
         std::shared_ptr<BlockModel> destinationBlock, PortDefinition destinationPort,                                    //
         EdgeParameters       parameters = {},                                                                            //
         std::source_location location   = std::source_location::current()) {
 
-        auto       srcPortResult    = sourceBlock->dynamicOutputPort(sourcePort);
-        const bool isArithmeticLike = srcPortResult ? srcPortResult.value()->isArithmeticLikeValueType() : true;
-        parameters.minBufferSize    = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(isArithmeticLike) : parameters.minBufferSize;
+        auto srcPortResult = sourceBlock->dynamicOutputPort(sourcePort);
+        if (!srcPortResult) {
+            return std::unexpected(Error(std::format("connect(): {} has no output port {} (its output ports: {})", sourceBlock->uniqueName(), sourcePort, portNames(sourceBlock->dynamicOutputPorts())), location));
+        }
+        auto dstPortResult = destinationBlock->dynamicInputPort(destinationPort);
+        if (!dstPortResult) {
+            return std::unexpected(Error(std::format("connect(): {} has no input port {} (its input ports: {})", destinationBlock->uniqueName(), destinationPort, portNames(destinationBlock->dynamicInputPorts())), location));
+        }
+        if (const std::string sourceType = srcPortResult.value()->typeName(), destinationType = dstPortResult.value()->typeName(); sourceType != destinationType) {
+            return std::unexpected(Error(std::format("connect(): {}.{} carries {} and {}.{} takes {}; the port types must be the same", sourceBlock->uniqueName(), sourcePort, sourceType, destinationBlock->uniqueName(), destinationPort, destinationType), location));
+        }
+        parameters.minBufferSize = parameters.minBufferSize == undefined_size ? graph::defaultMinBufferSize(srcPortResult.value()->isArithmeticLikeValueType()) : parameters.minBufferSize;
 
         Edge newEdge(sourceBlock, std::move(sourcePort),  //
             destinationBlock, std::move(destinationPort), //
@@ -1003,6 +1014,17 @@ public:
 private:
     // an input reads only the ring it was connected to last: a second edge into it leaves the first one listed with no
     // reader
+    // a collection reads as its name and index range, e.g. "in#0..2"
+    [[nodiscard]] static std::string portNames(const BlockModel::DynamicPorts& ports) {
+        const auto portName = [](const BlockModel::DynamicPortOrCollection& portOrCollection) {
+            if (const auto* collection = std::get_if<BlockModel::NamedPortCollection>(&portOrCollection)) {
+                return collection->ports.empty() ? std::format("{} (empty)", collection->name) : std::format("{}#0..{}", collection->name, collection->ports.size() - 1UZ);
+            }
+            return BlockModel::portName(portOrCollection);
+        };
+        return ports.empty() ? std::string("none") : std::views::transform(ports, portName) | std::views::join_with(std::string_view(", ")) | std::ranges::to<std::string>();
+    }
+
     [[nodiscard]] std::expected<void, Error> checkInputFree(const Edge& newEdge, PortType type, std::source_location location = std::source_location::current()) const {
         const auto taken = std::ranges::find_if(_edges, [&newEdge, type](const Edge& edge) { return edge.hasSameInput(newEdge, type); });
         if (taken == _edges.end()) {
